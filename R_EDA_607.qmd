@@ -1,5 +1,5 @@
 ---
-title: "Lab 3: Exploratory Data Analysis"
+title: "Exploratory Data Analysis: Health Outcomes and NYC Car Crashes"
 author: Tai Chou-Kudu
 format: pdf
 editor: source
@@ -21,7 +21,6 @@ library(dplyr)
 library(janitor)
 library(skimr)
 library(GGally)
-library(ggridges)
 ```
 
 We will also explore the concept of an *inlier*, which is an erroneous value that occurs in the interior of the distribution of a variable, rather than in the tails of the variable. The US Census [published an article on the problem of inliers here](https://www.census.gov/content/dam/Census/library/working-papers/1998/adrm/rr9805.pdf)
