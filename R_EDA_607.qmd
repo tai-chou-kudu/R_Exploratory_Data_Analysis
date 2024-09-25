@@ -1,0 +1,350 @@
+---
+title: "Lab 3: Exploratory Data Analysis"
+author: Tai Chou-Kudu
+format: pdf
+editor: source
+warning: false
+---
+
+## Overview
+
+This is a two part lab where each part will focus on a different dataset: the first part will use a dataset containing a series of diagnostic measurements taken on members of the Akimel O'odham people (an indigenous group living in the Southwestern United States who are also called the Pima) to understand diabetes risk ([click here to download diabetes.csv](https://github.com/georgehagstrom/DATA607/blob/main/website/assignments/labs/labData/diabetes.csv)), and the second dataset contains information on traffic accidents in New York City in the months of July and August of this year, and was compiled by NYC Open Data ([click here to download crashes.csv](https://github.com/georgehagstrom/DATA607/blob/main/website/assignments/labs/labData/crashes.csv)).
+
+For this problem set you will need to install the `skimr` and `GGally` packages, and in particular the functions `skim` and `ggpairs`.
+
+```{r}
+#|echo: FALSE
+library(tidyr)
+library(readr)
+library(ggplot2)
+library(dplyr)
+library(janitor)
+library(skimr)
+library(GGally)
+library(ggridges)
+```
+
+We will also explore the concept of an *inlier*, which is an erroneous value that occurs in the interior of the distribution of a variable, rather than in the tails of the variable. The US Census [published an article on the problem of inliers here](https://www.census.gov/content/dam/Census/library/working-papers/1998/adrm/rr9805.pdf)
+
+## Part 1: Health Diagnostics and Diabetes Incidence
+
+**Problem 1: Data Description and Outliers.**
+
+Load `diabetes.csv` into R and take a look at the data using the `skimr` package (make sure to install it if you don't have it). Skimr provides a tidy summary function called `skim`. Use `skim` on the data frame that you loaded from diabetes.csv.
+
+```{r read diabetes data}
+diabetes <- readr::read_csv(here::here('diabetes.csv'))
+```
+
+```{r skim diabetes data}
+#| results: asis
+cat("\\footnotesize\n")
+skim(diabetes)
+cat("\\footnotesize\n")
+
+```
+
+Skim will list several variables. Pregnancies is the past number of pregnancies (this dataset includes women 21 years or older), glucose describes the concentration of glucose in the blood after an oral glucose tolerance test (drinking a sugary drink and measuring two hours later), skin thickness is the result of a skinfold thickness test taken at the triceps (upper arm), Insulin is the insulin concentration in the blood taken at the same time as the glucose measurement (Insulin is a hormone that transports glucose into cells), BMI is "Body Mass Index", Diabetes Pedigree Function is a measure of diabetes risk based on the family history of diabetes for each patient (this is an engineered feature) and outcome is equal to 1 if the patient was diagnosed with diabetes with 5 years and 0 otherwise.
+
+a)  Skim should show no missing data, but should indicate potential data issues. Do any of the percentile ranges (p0, p25, p50, p75, or p100) for the reported variables suggest a potential problem?
+
+    **The variable: Skin thickness is likely missing values, since a skin thickness value of 0 seems unrealistic. The same goes for BMI and blood pressure variables.**
+
+b)  Further investigate the dataset to find potentially problematic variables using a qq-plot (`geom_qq`) or `group_by` combined with `count` and `arrange`. For which variables do you find repeated values and what are those values? Do you believe these values represent real measurements or could they correspond to missing data? Do the repeated variables occur in the same rows or different rows?
+
+    ```{r further investigate dataset}
+
+    long_data <- diabetes %>%
+      pivot_longer(cols = where(is.numeric), names_to = "variable", values_to = "value")
+
+    ggplot(long_data, aes(sample = value)) +
+      geom_qq() +
+      geom_qq_line() +
+      facet_wrap(~ variable, scales = "free") +  
+      theme_minimal() + 
+      ggtitle("QQ Plots for Diabetes Data Variables")
+
+    ```
+
+```{r investigate potential missing values}
+
+diabetes %>% 
+  group_by(BloodPressure) %>% 
+  count() %>% 
+  arrange(BloodPressure)
+  
+```
+
+```{r investigate more}
+diabetes %>% 
+  group_by(SkinThickness) %>% 
+  count() %>% 
+  arrange(SkinThickness)
+```
+
+```{r investigate again}
+diabetes %>% 
+  group_by(BMI) %>% 
+  count() %>% 
+  arrange(BMI)
+```
+
+```{r manually inspect if 0 rows are same or different}
+
+repeated_rows <- diabetes %>%
+  filter(BloodPressure == 0 | BMI == 0 | SkinThickness == 0)
+
+print(repeated_rows)
+
+```
+
+Write an overview of which values are missing and replace all missing values with NA for the next stage of analysis.
+
+```{r replace missing val with NA}
+diabetes_cleaned <- diabetes %>% 
+  mutate(across(c(SkinThickness, BloodPressure), ~ na_if(.,0)))
+```
+
+```{r replace more missing val with NA}
+diabetes_cleaned <- diabetes_cleaned %>% 
+  mutate(BMI = na_if(BMI,0.0))
+```
+
+**BMI, Skin Thickness, and Blood Pressure have missing values, as shown by the QQ Plots and further investigation by grouping by / count / arrange, and manually inspecting rows with 0 values.**
+
+c)  Perform Tukey Box plots on each variable to identify potential outliers. Which variables have the most outliers? Are there any outliers that you think come from measurement error? If so remove them.
+
+```{r box plots to identify outliers}
+#| fig-width: 8
+#| fig-height: 8
+long_data_cleaned <- diabetes_cleaned %>% 
+  pivot_longer(cols = where(is.numeric), names_to = "variable", values_to = "value")
+
+ggplot(long_data_cleaned, aes(x = variable, y = value)) +
+  geom_boxplot() +
+  facet_wrap(~ variable, scales = "free", nrow = 3)
+```
+
+**The variables: Insulin and Diabetes Pedigree Function have the most outliers. I don't know enough about insulin or how it's measured to make a decision to remove outliers. Same with DPF. Someone with medical domain knowledge or research study-specific knowledge would have to give their input in order to enact further decisions. Skin Thickness outliers make sense to remove, because how much can that truly vary? An outlier of 100, while the median is closer to 30, sounds like a huge gap. It could be a measurement error.**
+
+```{r view outlier to remove}
+diabetes_cleaned %>% 
+  group_by(SkinThickness) %>% 
+  count() %>% 
+  arrange(desc(SkinThickness))
+
+```
+
+```{r remove S.T. outlier}
+diabetes_cleaned <- diabetes_cleaned %>% 
+  mutate(SkinThickness = na_if(SkinThickness,99))
+```
+
+**Problem 2: Pair Plots**
+
+Use the `GGally` package and its function `ggpair` on both the original dataset and the cleaned dataset. Which correlations change the most? What are the strongest correlations between variables overall and with the `Outcome`?
+
+-   Remark: This dataset has been used an model dataset for the construction of binary classifiers using machine learning and there are a large number of published studies showing these analyses. However, many of these analyses did not exclude the missing values erroneously coded as zero, as is discussed in this interesting paper by [Breault](https://www.researchgate.net/profile/Joseph-Breault/publication/215899115_Data_mining_diabetic_databases_Are_rough_sets_a_useful_addition/links/0912f504615e8b6e0a000000/Data-mining-diabetic-databases-Are-rough-sets-a-useful-addition.pdf), leading to highly degraded accuracy.
+
+```{r ggpair exploration}
+#| fig-width: 8
+#| fig-height: 8
+#| warning: false
+ggpairs(diabetes)
+
+```
+
+```{r ggpair exploration cleaned}
+#| fig-width: 8
+#| fig-height: 8
+#| warning: false
+ggpairs(diabetes_cleaned)
+
+```
+
+**Skin Thickness's correlations changed a lot. BMI and Skin Thickness's correlation increased by \~ 0.3. S.T.'s correlations with glucose and blood pressure also increased. S.T.'s correlation with insulin decreased.**
+
+**Glucose and BMI have the strongest correlation with outcome. Skin thickness, age, and pregnancies also have notable correlations, but not as strong compared to glucose and BMI.**
+
+## Part 2: Car Crashes in NYC
+
+**Problem 3: Finding Inliers and Missing Data**
+
+Load the NYC car crash dataset using `read_csv`. You can download the data from the course website by [clicking here](https://github.com/georgehagstrom/DATA607/blob/main/website/assignments/labs/labData/crashes.csv).
+
+```{r read and clean crashes col names}
+crashes <- readr::read_csv(here::here('crashes.csv'))
+crashes <- janitor::clean_names(crashes)
+```
+
+```{r skim summary to see missing values in crashes}
+#| results: asis
+cat("\\scriptsize\n")
+skim_summary <- skim(crashes)
+skim_summary %>%
+  dplyr::filter(n_missing > 0)
+cat("\\scriptsize\n")
+
+```
+
+```{r skim crashes for general view}
+#| results: asis
+cat("\\scriptsize\n")
+skim(crashes)
+cat("\\scriptsize\n")
+
+```
+
+a)  Which variables have missing data (use `skim` or another tool of your choosing)? Some missing values have a different interpretation than others- what does it mean when `VEHICLE TYPE CODE 2` is missing compared to `LATITUDE`?
+
+    **Borough, Location, On Street Name, Cross Street Name, Off Street Name, Contributing Vehicle 1-5 (5 variables), Vehicle Type Code 1-5 (5 variables), Zip Code, Latitude, and Longitude. Vehicle Type Code 2 missing may not indicate missing data, perhaps a vehicle is assigned a category from 1 - 5 based on its type. Missing latitude, however, may indicate missing the data, the GPS coordinates.**
+
+b)  Latitude and Longitude have the same number of missing values. Verify that they always occur in the same row. Check the counts of latitude and longitude values- do you find any hidden missing values? If so recode them as NA.
+
+```{r check for hidden missing values - Lat}
+crashes %>% 
+  group_by(latitude) %>% 
+  count() %>% 
+  arrange(desc(n))
+```
+
+```{r check for hidden missing values - Lon}
+crashes %>% 
+  group_by(longitude) %>% 
+  count() %>% 
+  arrange(desc(n))
+```
+
+```{r recode missing val as NA}
+crashes <- crashes %>% 
+  mutate(latitude = if_else(latitude == 0.00000, NA_real_, latitude)) 
+
+crashes <- crashes %>% 
+  mutate(longitude = if_else(longitude == 0.00000, NA_real_, longitude)) 
+
+```
+
+```{r check NA rows that are same for Lon and Lat}
+#| eval: false
+both_missing <- which(is.na(crashes$latitude) & is.na(crashes$longitude))
+both_missing
+```
+
+```{r check if NA rows are diff}
+#| eval: false
+one_missing <- which(xor(is.na(crashes$latitude), is.na(crashes$longitude)))
+one_missing
+```
+
+**I recoded 0.00000 as NA for Latitude and Longitude. Rows with NA values were all the same rows for both columns.**
+
+a)  Many of the geographic values are missing, but geographic information is redundant in multiple variables in the dataset. For example, with effort you could determine the borough of an accident from the zip code, the latitude and longitude, or the streets (not part of the assignment for this week). Consider the borough variable- what percentage of the missing values of borough have values present of *at least* one of zip code or latitude. What about if we include all the street name variables? What fraction of rows don't have any detailed location information (latitude, zip code, or street names)?
+
+```{r percentage Borough NA, but zip code or Lat present}
+percentage <- crashes %>%
+  filter(is.na(borough)) %>% 
+  summarise(present_in_zip_or_lat = mean(!is.na(zip_code) | !is.na(latitude)) * 100) %>%  
+  pull(present_in_zip_or_lat)
+
+print(percentage)
+
+```
+
+```{r}
+fraction_no_loc_info <- crashes %>%
+  filter(is.na(borough)) %>% 
+  filter(!is.na(latitude) | !is.na(zip_code) | 
+         !is.na(on_street_name) | !is.na(cross_street_name) | !is.na(off_street_name)) %>%  
+  summarise(fraction = n() / sum(is.na(borough))) %>% 
+  pull(fraction)
+
+print(fraction_no_loc_info)
+```
+
+**45% of the rows with missing borough data have at least a zip code or latitude present, while 100% of rows with missing borough data have at least one location identifier, including street name data.**
+
+a)  The `CRASH TIME` variable has no missing values. Compute the count of how many times each individual time occurs in the crash data set. This will suggest that there are some inliers in the data. Compute summary statistics on the count data, and determine how many inliers there are (define an inlier as a data value where the count is an outlier, i.e. the count of that value is greater than 1.5\*IQR + P75, i.e. 1.5 times the interquartile range past the 75th percentile for the distribution of counts for values of that variable.) For which inliers do you believe the time is most likely to be accurate? For which is it least likely to be accurate and why do you think so?
+
+```{r find crash inliers by crash outliers of count}
+
+threshold <- crashes %>% 
+  group_by(crash_time) %>% 
+  count() %>% 
+  summarise(
+    iqr_CT = IQR(n),
+    p75_CT = quantile(n, 0.75),
+    outlier_of_count = quantile(n, 0.75) + (1.5 * IQR(n))
+  ) %>% 
+  pull(outlier_of_count)
+
+
+inliers <- crashes %>%
+  count(crash_time) %>%                          
+  filter(n <= threshold)                            
+
+print(inliers)
+
+```
+
+**The time is least likely inaccurate for 00:00:00 entries. This could potentially be coded in if the time was unknown, pointing to potential missing data for some of the 306 entries. For the non 00:00:00 entries, time is more likely to be accurately coded, although entries with precise minutes may be more precise than potentially estimated times, directly on the hour.**
+
+**Problem 4: Finding Patterns in the Data**
+
+Formulate a question about crash data in NYC and make visualizations to explore your question. It could be related to the geographical distribution of accidents, the timing of accidents, which types of vehicles lead to more or less dangerous accidents, or anything else you want. Write comments/notes describing your observations in each visualizations you create and mention how these observations impact your initial hypotheses.
+
+Useful questions to consider when you observe a pattern:
+
+-   Could this pattern be due to coincidence (i.e. random chance)?
+-   How can you describe the relationship implied by the pattern?
+-   How strong is the relationship implied by the pattern?
+-   What other variables might affect the relationship?
+-   Does the relationship change if you look at individual subgroups of the data?
+
+My question is: **Which streets have the highest recorded incidences of crashes? How can this information contribute to improving urban planning?**
+
+```{r highest crashes borough}
+
+crashes %>% 
+  filter(!is.na(borough)) %>% 
+  group_by(borough) %>% 
+  count() %>% 
+  arrange(desc(n))
+
+```
+
+```{r highest crashes by top 10 borough & street name combo}
+result <- crashes %>% 
+  filter(!is.na(borough) & !is.na(on_street_name)) %>% 
+  group_by(borough, on_street_name) %>% 
+  count() %>% 
+  arrange(desc(n)) %>% 
+  ungroup() %>% 
+  slice_max(n, n = 10) %>%  
+  mutate(borough = as.factor(borough), on_street_name = as.factor(on_street_name))
+
+
+```
+
+```{r bar plot}
+#| fig-width: 7
+#| fig-height: 10
+
+ggplot(result, aes(x = reorder(on_street_name, n), y = n, fill = borough)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +  
+  labs(title = "Jul & Aug '24:
+  Top 10 NYC Car Crash Counts by Street Name:
+       ",
+       x = "Street Name",
+       y = "Count of Car Crash Incidents") +
+  scale_fill_viridis_d() +  
+  theme_minimal() +
+  theme(legend.position = "bottom",  
+        legend.key.size = unit(0.5, "cm"),  
+        axis.text.y = element_text(size = 7),  
+        plot.title = element_text(size = 14, hjust = 0.5))  
+
+
+```
+
+We can see that Brooklyn has the highest number of crashes, while Staten Island has the lowest number of crashes. Brooklyn is home to the 4 streets with the highest car crash incidents. Atlantic Avenue and Fulton Street are certainly known to be busy areas, as a New Yorker. I don't have the domain knowledge or driving experience to know if there's tricky rotaries/ multiple-road lanes in these Top 10 street areas, but exploring road features would be the next direction I'd take this analysis in. If we explored time of crash, we could determine which streets have more crashes during daytime vs nighttime. High counts for nighttime crashes could point to a need for improved lighting by roads or in front of signs. Another important distinction to make would be what portion of crashes are caused by drunk-driving versus not. I could even turn the current box plot into a stacked box plot, with this information. Another interesting exploration would be to map socio-economic status of neighborhood/street and explore correlations with the Top 10 street names. The subway system often takes the longest to fix or upgrade in low socio economic neighborhoods. I'd hypothesize that some of these street names may be in low to mid level socio-economic neighborhoods. One last takeaway, as a resident of New York, is to be careful when walking by Atlantic Avenue area.
